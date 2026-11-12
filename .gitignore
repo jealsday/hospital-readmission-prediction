@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+.ipynb_checkpoints/
+
+# extracted from data/data.zip by data/download_data.py
+data/*.csv
