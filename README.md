@@ -119,7 +119,51 @@ source .venv/bin/activate     # Linux / macOS
 
 ## Results
 
-<!-- TODO: models compared, tuned parameters, validation AUC, final model choice. -->
+All the details are in [`notebook.ipynb`](notebook.ipynb).
+
+**Data preparation.** Encounters of patients who died or were discharged to a hospice are
+removed (they cannot be readmitted), leaving 99,340 encounters. The data is split **by
+patient** (60 % train, 20 % validation, 20 % test), so that the encounters of one patient
+never end up on both sides of a split. ICD-9 diagnosis codes are grouped into 9 clinical
+categories (Strack et al., 2014), and the three skewed visit counts are log-transformed.
+
+**Main findings of the analysis.**
+- Only 11.4 % of encounters end with a readmission within 30 days.
+- The number of inpatient admissions in the previous year is the strongest predictor: the
+  readmission rate goes from 8.6 % (no admission) to 31.4 % (4 or more).
+- The discharge destination matters: patients transferred to a rehab facility (27.7 %) or a
+  psychiatric hospital (36.7 %) are readmitted 2 to 3 times more often than patients sent
+  home (9.3 %).
+- Patients whose HbA1c was not measured are readmitted more often (11.7 %) than patients who
+  had the test (9.8 % to 10.1 %), as reported by Strack et al.
+
+**Model selection.** Three models were tuned on the training set and compared with ROC AUC
+on the validation set:
+
+| Model | Tuned parameters | Best values | Validation ROC AUC |
+|---|---|---|---|
+| Logistic regression | `C` | `C=0.1` | 0.659 |
+| Random forest | `max_depth`, `min_samples_leaf`, `n_estimators` | 20, 5, 200 | 0.668 |
+| **XGBoost** | `max_depth`, `min_child_weight`, rounds (early stopping), `eta=0.05` | 6, 10, 236 | **0.671** |
+
+XGBoost is selected. The gap with the other models is small (0.003 with the random forest,
+0.011 with the logistic regression), but serving it costs no more than a linear model.
+
+**Final model.** Retrained on train + validation and evaluated once on the test set:
+**ROC AUC = 0.677**, consistent with validation (no overfitting). The previous inpatient
+admissions (31 % of the total gain) and the discharge destination (18 %) drive the model.
+
+With the default threshold of 0.2, the model flags about 9 % of the discharged patients, and
+28 % of them are actually readmitted within 30 days, 2.4 times the average rate. The score is
+a tool to **prioritize** follow-up, not to decide alone: about 78 % of the readmissions are
+not flagged at this threshold.
+
+**Limitations.**
+- The data comes from 130 US hospitals between 1999 and 2008: the model must be retrained on
+  local data before being used elsewhere.
+- An AUC of 0.68 is modest. The dataset has little information on the patient's condition at
+  discharge (vital signs, social support, adherence to treatment), which limits what any
+  model can learn from it.
 
 ## Training
 
