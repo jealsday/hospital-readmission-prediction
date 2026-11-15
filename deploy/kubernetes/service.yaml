@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: readmission
+spec:
+  type: ClusterIP
+  selector:
+    app: readmission
+  ports:
+    - port: 80
+      targetPort: 9696

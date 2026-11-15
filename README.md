@@ -95,7 +95,7 @@ The script verifies the archive's SHA-256 checksum and downloads it from UCI if 
 | `predict.py` | Loads the model and serves it with FastAPI |
 | `test_predict.py`, `examples/patient.json` | Sends an example patient to the service |
 | `Dockerfile` | Container for the prediction service |
-| `deploy/` | Kubernetes manifests (kind) |
+| `deploy/kubernetes/` | Kubernetes manifests and deployment script (kind) |
 | `pyproject.toml`, `uv.lock` | Dependencies |
 
 ## Setup
@@ -215,4 +215,71 @@ docker run --rm -p 9696:9696 -e RISK_THRESHOLD=0.25 hospital-readmission
 
 ## Deployment
 
-<!-- TODO (day 5): kind cluster, manifests, port-forward, screenshot of a test request -->
+The service is deployed to a local Kubernetes cluster created with
+[kind](https://kind.sigs.k8s.io/). The manifests are in [`deploy/kubernetes/`](deploy/kubernetes/):
+
+| File | Content |
+|---|---|
+| [`deployment.yaml`](deploy/kubernetes/deployment.yaml) | One pod running the Docker image, with readiness and liveness probes on `/health` and CPU/memory requests and limits |
+| [`service.yaml`](deploy/kubernetes/service.yaml) | `ClusterIP` service: port 80 -> container port 9696 |
+| [`hpa.yaml`](deploy/kubernetes/hpa.yaml) | Horizontal Pod Autoscaler: 1 to 3 replicas at 50 % CPU |
+| [`deploy.sh`](deploy/kubernetes/deploy.sh) | Builds the image, creates the cluster, loads the image and applies the manifests |
+
+**Requirements:** Docker, [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
+and [kubectl](https://kubernetes.io/docs/tasks/tools/).
+
+Deploy (from the project root):
+
+```bash
+bash deploy/kubernetes/deploy.sh
+```
+
+which runs:
+
+```bash
+docker build -t hospital-readmission:v1 .
+kind create cluster --name readmission
+kind load docker-image hospital-readmission:v1 --name readmission   # kind nodes do not see host images
+kubectl apply -f deploy/kubernetes/ --context kind-readmission
+kubectl rollout status deployment/readmission --context kind-readmission
+```
+
+```text
+deployment "readmission" successfully rolled out
+NAME                               READY   STATUS    RESTARTS   AGE
+pod/readmission-6bb4747f9f-qssbd   1/1     Running   0          15s
+
+NAME                  TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
+service/readmission   ClusterIP   10.96.37.179   <none>        80/TCP    16s
+```
+
+Test it: forward the service port, then send the example patient from another terminal:
+
+```bash
+kubectl port-forward service/readmission 9696:80 --context kind-readmission
+python test_predict.py
+```
+
+```text
+health: {'status': 'ok', 'model': 'model.bin', 'threshold': 0.2}
+prediction: {'readmission_probability': 0.2838, 'high_risk': True, 'threshold': 0.2}
+```
+
+Screenshots of the test against the kind cluster:
+
+![Port-forward to the Kubernetes service](images/Kubernetes_test_01.png)
+
+![Prediction request through the port-forward](images/Kubernetes_test_02.png)
+
+The interactive API documentation, served by the pod at <http://localhost:9696/docs>:
+
+![FastAPI interactive documentation](images/documentation.png)
+
+The HPA shows `cpu: <unknown>/50%` because kind does not ship a metrics server; autoscaling
+needs [metrics-server](https://github.com/kubernetes-sigs/metrics-server) to be installed.
+
+Clean up:
+
+```bash
+kind delete cluster --name readmission
+```
